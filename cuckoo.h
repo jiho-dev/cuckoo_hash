@@ -1,5 +1,5 @@
-#ifndef __ASSOC_CUCKOO_H__
-#define __ASSOC_CUCKOO_H__
+#ifndef __CUCKOO_H__
+#define __CUCKOO_H__
 
 #include <stdint.h>
 #include <pthread.h>
@@ -14,7 +14,7 @@
 /*
  * enable parallel cuckoo
  */
-#define MEMC3_ASSOC_CUCKOO_WIDTH 1
+#define CUCKOO_WIDTH 1
 
 ////////////////////////////////
 
@@ -24,7 +24,6 @@
  * now change to 500
  */
 #define MAX_CUCKOO_COUNT 500
-
 
 /*
  * the structure of a bucket
@@ -74,9 +73,9 @@ typedef struct bucket {
 }  __attribute__((__packed__)) cuckoo_bucket_t;
 
 typedef struct cuckoo_path_s {
-	size_t			cp_buckets[MEMC3_ASSOC_CUCKOO_WIDTH];
-	size_t			cp_slot_idxs[MEMC3_ASSOC_CUCKOO_WIDTH];
-	cuckoo_slot_t	cp_slots[MEMC3_ASSOC_CUCKOO_WIDTH];
+	size_t			cp_buckets[CUCKOO_WIDTH];
+	size_t			cp_slot_idxs[CUCKOO_WIDTH];
+	cuckoo_slot_t	cp_slots[CUCKOO_WIDTH];
 } cuckoo_path_t;
 
 typedef struct cuckoo_hashtable_ {

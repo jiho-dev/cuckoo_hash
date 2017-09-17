@@ -243,7 +243,7 @@ static int32_t path_search(cuckoo_hash_table_t *cukht, size_t depth_start, size_
 		 * Check if any slot is already free
 		 */
 		size_t idx;
-		for (idx = 0; idx < MEMC3_ASSOC_CUCKOO_WIDTH; idx++) {
+		for (idx = 0; idx < CUCKOO_WIDTH; idx++) {
 			size_t i = from[idx];
 			size_t j;
 			for (j = 0; j < BUCKET_SLOT_SIZE; j++) {
@@ -265,7 +265,7 @@ static int32_t path_search(cuckoo_hash_table_t *cukht, size_t depth_start, size_
 								cukht->tag_mask, cukht->hash_mask);
 		}
 
-		cukht->num_kick += MEMC3_ASSOC_CUCKOO_WIDTH;
+		cukht->num_kick += CUCKOO_WIDTH;
 		depth++;
 	}
 
@@ -651,8 +651,8 @@ int32_t cuckoo_insert(cuckoo_hash_table_t *cukht, const char *key, const size_t 
 
 	int32_t idx;
 	size_t depth = 0;
-	for (idx = 0; idx < MEMC3_ASSOC_CUCKOO_WIDTH; idx++) {
-		if (idx < MEMC3_ASSOC_CUCKOO_WIDTH / 2) {
+	for (idx = 0; idx < CUCKOO_WIDTH; idx++) {
+		if (idx < CUCKOO_WIDTH / 2) {
 			cukht->cuk_path[depth].cp_buckets[idx] = i1;
 		}
 		else {

@@ -6,11 +6,8 @@
 #include <stdlib.h>
 #include <time.h>
 
-
-//#include "cuckoo.h"
-//#include "lib_cuckoo_hash.h"
 #include "cuckoo.h"
-//#include "MurmurHash3.h"
+#include "cuckoo_malloc.h"
 
 typedef struct word_list_s {
 	char	**word;
@@ -101,8 +98,8 @@ void get_words(word_list_t *w, int cnt)
 
 	w->word_cnt = 0;
 	w->alloc_cnt = cnt;
-	w->word = malloc(sizeof(char *) * cnt);
-	w->lens = malloc(sizeof(int) * cnt);
+	w->word = cuckoo_malloc(sizeof(char *) * cnt);
+	w->lens = cuckoo_malloc(sizeof(int) * cnt);
 
 	idx = 0;
 
@@ -145,149 +142,12 @@ void free_word_list(word_list_t *w)
 	int i;
 
 	for (i = 0; i < w->word_cnt; i++) {
-		free(w->word[i]);
+		cuckoo_free(w->word[i]);
 	}
 
-	free(w->word);
-	free(w->lens);
+	cuckoo_free(w->word);
+	cuckoo_free(w->lens);
 }
-
-
-#if 0
-int test_my_cuckoo(word_list_t *w, size_t elem_size)
-{
-	cuckoo_hashtable_t *ht;
-
-	//size_t shift = 11;
-	//size_t elem_size = POW2(shift);
-	//printf("elem_size=%lu \n", elem_size);
-
-	ht = cuckoo_alloc_hashtable(elem_size);
-	if (ht == NULL) {
-		printf("Cannot alloc hashtable ! \n");
-		return -1;
-	}
-
-	int ret = 0, i, inserted;
-	char *key;
-	char *val;
-	uint32_t klen;
-
-	for (i = 0; i < w->word_cnt; i += 2) {
-		key = strdup(w->word[i]);
-		klen = strlen(key);
-		val = strdup(w->word[i + 1]);
-
-		ret = cuckoo_add_element(ht, (cuckoo_key_t)key, klen, (cuckoo_value_t)val);
-		if (ret != 0) {
-#if 0
-			printf("%d: add ret=%d, used=%d, stash.used=%d \n",
-				   i / 2, ret, ht->used, ht->stash.used);
-#endif
-
-			if (ret < 0) {
-				break;
-			}
-		}
-	}
-
-	if (ret != 0) {
-		inserted = i - 2;
-	}
-	else {
-		inserted = i;
-	}
-
-	printf("adding key pairs: %d of %lu \n", inserted / 2, elem_size);
-	printf("usage: %d of %u, stash.used:%d \n", ht->used, ht->element_size, ht->stash.used);
-	printf("lookup key pairs: %d of %lu \n", inserted / 2, elem_size);
-
-	fflush(NULL);
-
-	for (i = 0; i < (inserted); i += 2) {
-		key = strdup(w->word[i]);
-		klen = strlen(key);
-		val = w->word[i + 1];
-
-		char *val1 = (char *)cuckoo_lookup_element(ht, (cuckoo_key_t)key, klen);
-
-		if (val1 == NULL || strncmp(val, val1, klen) != 0) {
-			printf("%d: mismatch value: val=%s, %s \n", i / 2, val, val1);
-		}
-	}
-
-	printf("done. \n");
-
-
-	return 0;
-}
-
-int test_lib_cuckoo(word_list_t *w, size_t elem_size)
-{
-	struct cuckoo_hash ht;
-	int power = 4;
-	int max_depth = power << 5;
-	int bin_size = 4;
-
-	printf("hash size=%u, max_dep=%d \n", bin_size << 9, max_depth);
-
-	if (!cuckoo_hash_init(&ht, 9)) {
-		printf("Cannot alloc hashtable ! \n");
-		return -1;
-	}
-
-	int i, inserted;
-	char *key;
-	char *val;
-	uint32_t klen;
-
-	for (i = 0; i < w->word_cnt; i += 2) {
-		key = strdup(w->word[i]);
-		klen = strlen(key);
-		val = strdup(w->word[i + 1]);
-
-		void *ret;
-
-		ret = cuckoo_hash_insert(&ht, key, klen, val);
-		if (ret != NULL || ret == CUCKOO_HASH_FAILED) {
-			printf("insert failed: key=%s, val=%s \n", key, val);
-#if 0
-			printf("%d: add ret=%d, used=%d, stash.used=%d \n",
-				   i / 2, ret, ht->used, ht->stash.used);
-#endif
-			break;
-		}
-	}
-
-	printf("adding key pairs: %ld of %lu \n", ht.count, elem_size);
-	printf("lookup key pairs: %ld of %lu \n", ht.count, elem_size);
-	fflush(NULL);
-
-	inserted = ht.count * 2;
-
-	for (i = 0; i < (inserted); i += 2) {
-		key = strdup(w->word[i]);
-		klen = strlen(key);
-		val = w->word[i + 1];
-
-		char *val1 = NULL;
-		struct cuckoo_hash_item *it;
-
-		it = cuckoo_hash_lookup(&ht, key, klen);
-		if (it) {
-			val1 = (char *)it->value;
-		}
-
-		if (val1 == NULL || strncmp(val, val1, klen) != 0) {
-			printf("%d: mismatch value: val=%s, %s \n", i / 2, val, val1);
-		}
-	}
-
-	printf("done. \n");
-
-	return 0;
-}
-#endif
 
 int _compare_key(const void *key1, const void *key2, const size_t nkey)
 {
@@ -308,7 +168,7 @@ int _compare_key(const void *key1, const void *key2, const size_t nkey)
 cuckoo_item_t* alloc_item(const char *key, const char *val, int len)
 {
 
-	cuckoo_item_t *it = malloc(sizeof(cuckoo_item_t));
+	cuckoo_item_t *it = cuckoo_malloc(sizeof(cuckoo_item_t));
 	
 	if (it == NULL) {
 		return NULL;
@@ -327,9 +187,9 @@ void free_item(cuckoo_item_t *it)
 		return;
 	}
 
-	free((void*)it->key);
-	free(it->value);
-	free(it);
+	cuckoo_free((void*)it->key);
+	cuckoo_free(it->value);
+	cuckoo_free(it);
 }
 
 struct timespec diff_time(char *msg, struct timespec start, struct timespec end, int cnt)
@@ -362,7 +222,7 @@ int test_lock_cuckoo(word_list_t *w, int thread_test)
 	cuckoo_hash_table_t *cukht;
 	cuckoo_item_t **items;
 
-	items = malloc(sizeof(cuckoo_item_t*) * w->word_cnt);
+	items = cuckoo_malloc(sizeof(cuckoo_item_t*) * w->word_cnt);
 
 	for (i = 0; i < w->word_cnt; i++) {
 		key = w->word[i];
@@ -622,6 +482,8 @@ int main()
 {
 	word_list_t w;
 
+	memset(&w, 0, sizeof(w));
+
 	printf("Start testing... \n");
 	printf("pid=%d\n", getpid());
 	fflush(NULL);
@@ -632,12 +494,12 @@ int main()
 #define MAX_WORD    9462148
 //#define MAX_WORD    1000000
 
-	//get_words(&w, MAX_WORD);
+	get_words(&w, MAX_WORD);
 
 	printf("word count:%d \n", w.word_cnt);
 	fflush(NULL);
 
-	//test_lock_cuckoo(&w, 0);
+	test_lock_cuckoo(&w, 0);
 	
 	return 0;
 }
