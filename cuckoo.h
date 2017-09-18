@@ -16,6 +16,25 @@
  */
 #define CUCKOO_WIDTH 1
 
+
+
+
+/*
+ * enable bucket locking
+ */
+#define MEMC3_LOCK_FINEGRAIN    1
+
+/*
+ * enable optimistic locking
+ */
+//#define MEMC3_LOCK_OPT    1
+
+
+#if (MEMC3_LOCK_OPT + MEMC3_LOCK_FINEGRAIN + MEMC3_LOCK_GLOBAL + MEMC3_LOCK_NONE != 1)
+#error "you must specify one and only locking policy"
+#endif
+
+
 ////////////////////////////////
 
 /*
@@ -41,6 +60,16 @@
 #define IS_TAG_EQUAL(cukht, i, j, tag) ((cukht->buckets[i].tags[j] & cukht->tag_mask) == tag)
 
 #define RET_PTR_ERR 	((void*)-1)
+
+
+//#ifdef MEMC3_LOCK_OPT
+//  keyver array has 8192 buckets,
+#define  keyver_count 		((unsigned long int)1 << (13))
+#define  keyver_mask  		(keyver_count - 1)
+#define read_keyver(cukht, lock) 	__sync_fetch_and_add(&cukht->keyver_array[lock & keyver_mask], 0)
+#define incr_keyver(cukht, lock) 	__sync_fetch_and_add(&cukht->keyver_array[lock & keyver_mask], 1)
+
+//#endif
 
 /////////////////////////////////////////////////
 
@@ -83,6 +112,11 @@ typedef struct cuckoo_hashtable_ {
 	cuckoo_cmp_key		cb_cmp_key;
 	cuckoo_spinlock_t	*fg_locks;
 	cuckoo_path_t		*cuk_path;
+	cuckoo_spinlock_t	wlocks;
+
+//#ifdef MEMC3_LOCK_OPT
+	uint32_t keyver_array[keyver_count];
+//#endif
 
 	uint32_t			idx_victim;
 	uint32_t			num_error;
@@ -103,9 +137,10 @@ typedef struct cuckoo_hashtable_ {
 
 cuckoo_hash_table_t* cuckoo_init_hash_table(const int32_t hashpower_init, cuckoo_cmp_key cmp_key);
 void cuckoo_destroy_hash_table(cuckoo_hash_table_t *cukht);
-void* cuckoo_find(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey);
-int32_t cuckoo_insert(cuckoo_hash_table_t *cukht, const char *key, const size_t klen, void *data);
-void* cuckoo_delete(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey);
+void* cuckoo_find(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey, const uint32_t hash);
+int32_t cuckoo_insert(cuckoo_hash_table_t *cukht, const uint32_t hash, void *data);
+void* cuckoo_delete(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey, const uint32_t hash);
+uint32_t cuckoo_hash(const char *key, const uint32_t len);
 
 
 #endif
