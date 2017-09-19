@@ -22,12 +22,12 @@
 /*
  * enable bucket locking
  */
-#define MEMC3_LOCK_FINEGRAIN    1
+//#define MEMC3_LOCK_FINEGRAIN    1
 
 /*
  * enable optimistic locking
  */
-//#define MEMC3_LOCK_OPT    1
+#define MEMC3_LOCK_OPT    1
 
 
 #if (MEMC3_LOCK_OPT + MEMC3_LOCK_FINEGRAIN + MEMC3_LOCK_GLOBAL + MEMC3_LOCK_NONE != 1)
@@ -64,10 +64,10 @@
 
 //#ifdef MEMC3_LOCK_OPT
 //  keyver array has 8192 buckets,
-#define  keyver_count 		((unsigned long int)1 << (13))
-#define  keyver_mask  		(keyver_count - 1)
-#define read_keyver(cukht, lock) 	__sync_fetch_and_add(&cukht->keyver_array[lock & keyver_mask], 0)
-#define incr_keyver(cukht, lock) 	__sync_fetch_and_add(&cukht->keyver_array[lock & keyver_mask], 1)
+#define KEYVER_COUNT 		((unsigned long int)1 << (13))
+#define KEYVER_MASK  		(KEYVER_COUNT - 1)
+#define READ_KEYVER(cukht, lock) 	__sync_fetch_and_add(&cukht->keyver_array[lock & KEYVER_MASK], 0)
+#define INC_KEYVER(cukht, lock) 	__sync_fetch_and_add(&cukht->keyver_array[lock & KEYVER_MASK], 1)
 
 //#endif
 
@@ -110,13 +110,12 @@ typedef struct cuckoo_path_s {
 typedef struct cuckoo_hashtable_ {
 	cuckoo_bucket_t		*buckets;
 	cuckoo_cmp_key		cb_cmp_key;
-	cuckoo_spinlock_t	*fg_locks;
 	cuckoo_path_t		*cuk_path;
-	cuckoo_spinlock_t	wlocks;
 
-//#ifdef MEMC3_LOCK_OPT
-	uint32_t keyver_array[keyver_count];
-//#endif
+	cuckoo_spinlock_t	*fg_locks;
+	cuckoo_spinlock_t	wlock;
+	uint32_t keyver_array[KEYVER_COUNT];
+
 
 	uint32_t			idx_victim;
 	uint32_t			num_error;

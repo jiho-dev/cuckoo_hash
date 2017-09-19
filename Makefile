@@ -1,6 +1,6 @@
 CC=gcc
 CFLAGS=-I. -O2 #-std=c99
-CFLAGS+=-W -Wall -Wextra -Wno-unused-function
+CFLAGS+=-W -Wall -Wextra -Wno-unused-function -Wno-unused-parameter
 #CFLAGS+=-Werror # treat a warning as an error
 #CFLAGS+=-D_REENTRANT -D_GNU_SOURCE
 CFLAGS+=-D__DEBUG__ -g
@@ -9,6 +9,7 @@ LDFLAGS=-pthread -lpthread
 
 OBJDIR=obj
 SRCS = cuckoo.c cuckoo_malloc.c MurmurHash3.c
+SRCS += bin_cuckoo.c
 SRCS += benchmark.c
 DEPS = cuckoo.h 
 

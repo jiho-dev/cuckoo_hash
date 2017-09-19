@@ -10,6 +10,8 @@
 #include "cuckoo_malloc.h"
 #include "MurmurHash3.h"
 
+#include "benchmark.h"
+
 /////////////////////////////////////////////
 
 #if 0
@@ -124,14 +126,8 @@ tag_t tag_hash(const uint32_t hv, const uint64_t tagmask)
 	return (tag_t)r + (r == 0);
 }
 
-static inline size_t _lock_index(const size_t i1, const size_t i2) {
-    /* if ((tag & locmask) == 0) { */
-    /*     return i1; */
-    /* } else { */
-    /*     return i2; */
-    /* } */
-    //return tag;
-	
+static inline size_t lock_index(const size_t i1, const size_t i2) 
+{
     return i1 <  i2 ? i1 : i2;
 }
 /////////////////////////////////////////////////
@@ -237,10 +233,30 @@ static int32_t try_add(cuckoo_hash_table_t *cukht, void *data, tag_t tag, size_t
 {
 	size_t j;
 
+	if (lock) {
+	}
+
+#ifdef MEMC3_LOCK_OPT
+	uint32_t vs, ve;
+
+TRY_START:
+	vs = READ_KEYVER(cukht, lock);
+
+	if (vs & 1)
+		goto TRY_START;
+#endif
+
 	for (j = 0; j < BUCKET_SLOT_SIZE; j++) {
+#ifdef MEMC3_LOCK_OPT
+		ve = READ_KEYVER(cukht, lock);
+#endif
+
 		if (IS_SLOT_EMPTY(cukht, i, j)) {
 #ifdef MEMC3_LOCK_OPT
-            incr_keyver(cukht, lock);
+			if (vs != ve)
+				goto TRY_START;
+
+			INC_KEYVER(cukht, lock);
 #endif
 
 #ifdef MEMC3_LOCK_FINEGRAIN
@@ -252,7 +268,7 @@ static int32_t try_add(cuckoo_hash_table_t *cukht, void *data, tag_t tag, size_t
 			cukht->num_items++;
 
 #ifdef MEMC3_LOCK_OPT
-            incr_keyver(cukht, lock);
+			INC_KEYVER(cukht, lock);
 #endif
 
 #ifdef MEMC3_LOCK_FINEGRAIN
@@ -272,6 +288,9 @@ static void* try_del(cuckoo_hash_table_t *cukht, const char *key, const size_t n
 
 	void *data = NULL;
 
+	if (lock) {
+	}
+
 	for (j = 0; j < BUCKET_SLOT_SIZE; j++) {
 		if (!IS_TAG_EQUAL(cukht, i, j, tag)) {
 			continue;
@@ -287,7 +306,7 @@ static void* try_del(cuckoo_hash_table_t *cukht, const char *key, const size_t n
 		// call _compare_key()
 		if (cukht->cb_cmp_key((const void *)key, data, nkey) == 0) {
 #ifdef MEMC3_LOCK_OPT
-			incr_keyver(cukht, lock);
+			INC_KEYVER(cukht, lock);
 #endif
 
 #ifdef MEMC3_LOCK_FINEGRAIN
@@ -299,7 +318,7 @@ static void* try_del(cuckoo_hash_table_t *cukht, const char *key, const size_t n
 			cukht->num_items--;
 
 #ifdef MEMC3_LOCK_OPT
-			incr_keyver(cukht, lock);
+			INC_KEYVER(cukht, lock);
 #endif
 
 #ifdef MEMC3_LOCK_FINEGRAIN
@@ -387,8 +406,8 @@ static int32_t move_backward(cuckoo_hash_table_t *cukht, size_t depth_start, siz
 
 		if (IS_SLOT_EMPTY(cukht, i2, j2)) {
 #ifdef MEMC3_LOCK_OPT
-			size_t lock   = _lock_index(i1, i2);
-			incr_keyver(cukht, lock);
+			size_t lock   = lock_index(i1, i2);
+			INC_KEYVER(cukht, lock);
 #endif
 #ifdef MEMC3_LOCK_FINEGRAIN
 			fg_lock(cukht, i1, i2);
@@ -403,7 +422,7 @@ static int32_t move_backward(cuckoo_hash_table_t *cukht, size_t depth_start, siz
 			cukht->num_moves++;
 
 #ifdef MEMC3_LOCK_OPT
-			incr_keyver(cukht, lock);
+			INC_KEYVER(cukht, lock);
 #endif
 
 #ifdef MEMC3_LOCK_FINEGRAIN
@@ -498,9 +517,9 @@ cuckoo_init_hash_table(const int32_t hashtable_init, cuckoo_cmp_key cmp_key)
 		pthread_spin_init(&cukht->fg_locks[i], PTHREAD_PROCESS_PRIVATE);
 	}
 
-	pthread_spin_init(&cukht->wlocks, PTHREAD_PROCESS_PRIVATE);
+	pthread_spin_init(&cukht->wlock, PTHREAD_PROCESS_PRIVATE);
 
-    memset(cukht->keyver_array, 0, sizeof(uint32_t) * keyver_count);
+    memset(cukht->keyver_array, 0, sizeof(uint32_t) * KEYVER_COUNT);
 
 	cukht->cb_cmp_key = dummy_cmp_key;
 	if (cmp_key) {
@@ -566,7 +585,7 @@ void* cuckoo_delete(cuckoo_hash_table_t *cukht, const char *key, const size_t nk
 	tag = tag_hash(hash, cukht->tag_mask);
 	i1 = index_hash(hash, cukht->hash_power);
 	i2 = alt_index(i1, tag, cukht->tag_mask, cukht->hash_mask);
-    size_t lock = _lock_index(i1, i2);
+    size_t lock = lock_index(i1, i2);
 
 	data = try_del(cukht, key, nkey, tag, i1, lock);
 	if (data != RET_PTR_ERR) {
@@ -597,12 +616,12 @@ void* cuckoo_find(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey
 	void *result = NULL;
 
 #ifdef MEMC3_LOCK_OPT
-    size_t lock = _lock_index(i1, i2);
-    uint32_t vs, ve;
+	size_t lock = lock_index(i1, i2);
+	uint32_t vs, ve;
 TryRead:
-    vs = read_keyver(cukht, lock);
+	vs = READ_KEYVER(cukht, lock);
 #endif
-	
+
 #ifdef MEMC3_LOCK_FINEGRAIN
 	fg_lock(cukht, i1, i2);
 #endif
@@ -616,6 +635,11 @@ TryRead:
 
 	size_t j;
 
+#ifdef MEMC3_LOCK_OPT
+	if (vs & 1) 
+		goto TryRead;
+#endif
+
 	for (j = 0; j < BUCKET_SLOT_SIZE; j++) {
 		uint8_t ch = ((uint8_t *)&tags1)[j];
 		if (ch != tag) {
@@ -627,6 +651,12 @@ TryRead:
 			continue;
 		}
 
+#ifdef MEMC3_LOCK_OPT
+		ve = READ_KEYVER(cukht, lock);
+
+		if (vs & 1 || vs != ve)
+			goto TryRead;
+#endif
 		//__builtin_prefetch(data);
 		// call _compare_key()
 		if (cukht->cb_cmp_key((const void *)key, data, nkey) == 0) {
@@ -650,6 +680,12 @@ TryRead:
 				continue;
 			}
 
+#ifdef MEMC3_LOCK_OPT
+			ve = READ_KEYVER(cukht, lock);
+
+			if (vs & 1 || vs != ve)
+				goto TryRead;
+#endif
 			//__builtin_prefetch(data);
 			// call _compare_key()
 			if (cukht->cb_cmp_key((const void *)key, data, nkey) == 0) {
@@ -662,10 +698,10 @@ TryRead:
 END:
 
 #ifdef MEMC3_LOCK_OPT
-    ve = read_keyver(cukht, lock);
+	ve = READ_KEYVER(cukht, lock);
 
-    if (vs & 1 || vs != ve)
-        goto TryRead;
+	if (vs & 1 || vs != ve)
+		goto TryRead;
 #endif
 
 #ifdef MEMC3_LOCK_FINEGRAIN
@@ -685,7 +721,8 @@ int32_t cuckoo_insert(cuckoo_hash_table_t *cukht, const uint32_t hash, void *dat
 	tag = tag_hash(hash, cukht->tag_mask);
 	i1 = index_hash(hash, cukht->hash_power);
 	i2 = alt_index(i1, tag, cukht->tag_mask, cukht->hash_mask);
-    size_t lock = _lock_index(i1, i2);
+	size_t lock = lock_index(i1, i2);
+
 
 	if (try_add(cukht, data, tag, i1, lock)) {
 		return 1;
@@ -732,6 +769,8 @@ int32_t cuckoo_insert(cuckoo_hash_table_t *cukht, const uint32_t hash, void *dat
 	return 0;
 }
 
+/////////////////////////////////////////////////
+
 #if 0
 void assoc2_post_bench()
 {
@@ -748,3 +787,175 @@ void assoc2_post_bench()
 }
 
 #endif
+
+
+static int fglock_compare_key(const void *key1, const void *key2, const size_t nkey)
+{
+	const char *_key1 = (const char *)key1;
+	//const char *_key2 = (const char *)key2;
+	const char *_key2;
+#if 0
+	cuckoo_item_t *it = (cuckoo_item_t*)key2;
+	_key2 = (const char*)it->key;
+
+	if (nkey != it->key_len) {
+		return -1;
+	}
+
+
+	char **pp = (char**)it;
+	char *p = *pp;
+	printf("it=%p, %p, key=%p, %p \n", it, pp,  it->key, p );
+#else
+	char **pp = (char**)key2;
+	_key2 = (const char*)*pp;
+#endif
+
+	return memcmp(_key1, _key2, nkey);
+}
+
+static cuckoo_item_t* fglock_alloc_item(const char *key, const char *val, int len)
+{
+
+	cuckoo_item_t *it = cuckoo_malloc(sizeof(cuckoo_item_t));
+	
+	if (it == NULL) {
+		return NULL;
+	}
+
+	it->key = strdup(key);
+	it->key_len = len;
+	it->value = strdup(val);
+
+	return it;
+}
+
+static void fglock_free_item(cuckoo_item_t *it)
+{
+	if (it == NULL || it == RET_PTR_ERR) {
+		return;
+	}
+
+	cuckoo_free((void*)it->key);
+	cuckoo_free(it->value);
+	cuckoo_free(it);
+}
+
+static void* fglock_bench_init_hash_table(word_list_t *wordlist)
+{
+	cuckoo_hash_table_t *fglock_ht;
+	int i;
+
+	///////////////////////////
+	// init hash entries
+	for (i = 0; i < wordlist->word_cnt; i++) {
+		char *key = wordlist->word[i];
+		char *val = key;
+
+		cuckoo_item_t* it = fglock_alloc_item(key, val, wordlist->lens[i]);
+		wordlist->items[i] = (void*)it;
+	}
+
+	///////////////////////////
+	// init hash tables
+	fglock_ht = cuckoo_init_hash_table(23, fglock_compare_key);
+
+	printf("Hashtable size: %lu\n", fglock_ht->hash_size);
+	fflush(NULL);
+
+	return (void*)fglock_ht;
+}
+
+static void fglock_bench_print_hash_table_info(void *_ht, char *msg)
+{
+	cuckoo_hash_table_t *fglock_ht = (cuckoo_hash_table_t*)_ht;
+
+	printf("%s key pairs: %d \n", msg, fglock_ht->num_items);
+	printf("Cuckoo Movements: %d \n", fglock_ht->num_moves);
+	fflush(NULL);
+}
+
+static int fglock_bench_insert_item(void *_ht, const char *key, const size_t len, void *val, uint32_t hash, void *data)
+{
+	cuckoo_hash_table_t *fglock_ht = (cuckoo_hash_table_t*)_ht;
+
+	int ret;
+
+	//pthread_spin_lock(&fglock_ht->wlock);
+	ret= cuckoo_insert(fglock_ht, hash, data);
+	//pthread_spin_unlock(&fglock_ht->wlock);
+
+	return ret;
+}
+
+static int fglock_bench_alloc_insert_data(void *_ht, const char *key, const size_t len, void *val, uint32_t hash)
+{
+	cuckoo_item_t* it = fglock_alloc_item(key, val, len);
+	
+	if (it) {
+		fglock_bench_insert_item(_ht,key, len, val, hash, it);
+		return 0;
+	}
+
+	return -1;
+}
+
+static int fglock_bench_search_item(void *_ht, const char *key, const size_t len, uint32_t hash)
+{
+	cuckoo_hash_table_t *fglock_ht = (cuckoo_hash_table_t*)_ht;
+	cuckoo_item_t *it;
+
+	it = cuckoo_find(fglock_ht, key, len, hash);
+#if 0
+	if (it) {
+		val1 = (char *)it->value;
+	}
+#endif
+
+	if (it != NULL 
+		//&& strncmp(val, val1, klen) != 0
+		) {
+		return 0;
+	}
+
+	return -1;
+}
+
+static void* fglock_bench_delete_item(void *_ht, const char *key,  const size_t len, uint32_t hash)
+{
+	cuckoo_hash_table_t *fglock_ht = (cuckoo_hash_table_t*)_ht;
+	cuckoo_item_t *it;
+
+	pthread_spin_lock(&fglock_ht->wlock);
+	it = cuckoo_delete(fglock_ht, key, len, hash);
+	pthread_spin_unlock(&fglock_ht->wlock);
+
+	if (it != RET_PTR_ERR && it != NULL) {
+		fglock_free_item(it);
+	}
+
+	return it;
+}
+
+static void fglock_bench_clean_hash_table(void *_ht)
+{
+	cuckoo_hash_table_t *fglock_ht = (cuckoo_hash_table_t*)_ht;
+
+	cuckoo_destroy_hash_table(fglock_ht);
+}
+
+//////////////////////////////////
+
+cuckoo_bench_t fglock_bench = {
+	.name = "FGLOCK_HASHTABLE",
+	
+	.bench_init_hash_table = fglock_bench_init_hash_table,
+	.bench_clean_hash_table = fglock_bench_clean_hash_table,
+
+	.bench_insert_item = fglock_bench_insert_item,
+	.bench_alloc_insert_data = fglock_bench_alloc_insert_data,
+	.bench_search_item = fglock_bench_search_item,
+	.bench_delete_item = fglock_bench_delete_item,
+	
+	.bench_print_hash_table_info = fglock_bench_print_hash_table_info,
+};

@@ -3,7 +3,9 @@
 
 #include "MurmurHash3.h"
 #include "cuckoo_malloc.h"
-#include "cuckoo.h"
+#include "bin_cuckoo.h"
+#include "benchmark.h"
+
 
 
 
@@ -415,3 +417,185 @@ cuckoo_lookup_element(cuckoo_hashtable_t *ht, cuckoo_key_t key, uint32_t klen)
 
 	return (cuckoo_value_t)NULL;
 }
+
+/////////////////////////////////////
+// for benchmark
+
+#if 0
+static int slot_compare_key(const void *key1, const void *key2, const size_t nkey)
+{
+	const char *_key1 = (const char *)key1;
+	//const char *_key2 = (const char *)key2;
+	const char *_key2;
+#if 0
+	cuckoo_item_t *it = (cuckoo_item_t*)key2;
+	_key2 = (const char*)it->key;
+
+	if (nkey != it->key_len) {
+		return -1;
+	}
+
+
+	char **pp = (char**)it;
+	char *p = *pp;
+	printf("it=%p, %p, key=%p, %p \n", it, pp,  it->key, p );
+#else
+	char **pp = (char**)key2;
+	_key2 = (const char*)*pp;
+#endif
+
+	return memcmp(_key1, _key2, nkey);
+}
+
+static cuckoo_item_t* slot_alloc_item(const char *key, const char *val, int len)
+{
+
+	cuckoo_item_t *it = cuckoo_malloc(sizeof(cuckoo_item_t));
+	
+	if (it == NULL) {
+		return NULL;
+	}
+
+	it->key = strdup(key);
+	it->key_len = len;
+	it->value = strdup(val);
+
+	return it;
+}
+
+static void slot_free_item(cuckoo_item_t *it)
+{
+	if (it == NULL || it == RET_PTR_ERR) {
+		return;
+	}
+
+	cuckoo_free((void*)it->key);
+	cuckoo_free(it->value);
+	cuckoo_free(it);
+}
+#endif
+
+static void* slot_bench_init_hash_table(word_list_t *wordlist)
+{
+	cuckoo_hashtable_t *slot_ht;
+	int i;
+
+	///////////////////////////
+	// init hash entries
+	for (i = 0; i < wordlist->word_cnt; i++) {
+		//char *key = wordlist->word[i];
+		//char *val = key;
+
+		//cuckoo_item_t* it = slot_alloc_item(key, val, wordlist->lens[i]);
+		wordlist->items[i] = NULL;
+	}
+
+	///////////////////////////
+	// init hash tables
+	size_t elem_size = POW2(23);
+	//slot_ht = cuckoo_alloc_hashtable(wordlist->word_cnt);
+	slot_ht = cuckoo_alloc_hashtable(elem_size);
+
+	printf("Hashtable size: %u\n", slot_ht->bucket_size);
+	fflush(NULL);
+
+	return (void*)slot_ht;
+}
+
+static void slot_bench_print_hash_table_info(void *_ht, char *msg)
+{
+	cuckoo_hashtable_t *slot_ht = (cuckoo_hashtable_t*)_ht;
+
+	printf("%s key pairs: %d \n", msg, slot_ht->element_size);
+	//printf("Cuckoo Movements: %d \n", slot_ht->num_moves);
+	fflush(NULL);
+}
+
+static int slot_bench_insert_item(void *_ht, const char *key, const size_t len, void *val, uint32_t hash, void *data)
+{
+	cuckoo_hashtable_t *slot_ht = (cuckoo_hashtable_t*)_ht;
+
+	int ret;
+
+	//pthread_spin_lock(&slot_ht->wlocks);
+	//ret= cuckoo_insert(slot_ht, hash, data);
+	//pthread_spin_unlock(&slot_ht->wlocks);
+	ret = cuckoo_add_element(slot_ht, (cuckoo_key_t)key, len, (cuckoo_value_t)val);
+
+	return (ret < 0) ? 0 : 1;
+}
+
+static int slot_bench_alloc_insert_data(void *_ht, const char *key, const size_t len, void *val, uint32_t hash)
+{
+#if 0
+	cuckoo_item_t* it = slot_alloc_item(key, val, len);
+	
+	if (it) {
+		slot_bench_insert_item(_ht, hash, it);
+		return 0;
+	}
+
+	return -1;
+#else
+	return 0;
+#endif
+}
+
+static int slot_bench_search_item(void *_ht, const char *key, const size_t len, uint32_t hash)
+{
+	cuckoo_hashtable_t *slot_ht = (cuckoo_hashtable_t*)_ht;
+	char *val;
+
+	val = (char *)cuckoo_lookup_element(slot_ht, (cuckoo_key_t)key, len);
+
+	if (val != NULL 
+		//&& strncmp(val, val1, klen) != 0
+	   ) {
+		return 0;
+	}
+
+	return -1;
+}
+
+static void* slot_bench_delete_item(void *_ht, const char *key,  const size_t len, uint32_t hash)
+{
+#if 0
+	cuckoo_hashtable_t *slot_ht = (cuckoo_hashtable_t*)_ht;
+	cuckoo_item_t *it;
+
+	pthread_spin_lock(&slot_ht->wlocks);
+	it = cuckoo_delete(slot_ht, key, len, hash);
+	pthread_spin_unlock(&slot_ht->wlocks);
+
+	if (it != RET_PTR_ERR && it != NULL) {
+		slot_free_item(it);
+	}
+
+	return it;
+#else
+	return NULL;
+#endif 
+}
+
+static void slot_bench_clean_hash_table(void *_ht)
+{
+	cuckoo_hashtable_t *slot_ht = (cuckoo_hashtable_t*)_ht;
+
+	cuckoo_free_hashtable(slot_ht);
+}
+
+//////////////////////////////////
+
+cuckoo_bench_t slot_bench = {
+	.name = "SLOT_HASHTABLE",
+	
+	.bench_init_hash_table = slot_bench_init_hash_table,
+	.bench_clean_hash_table = slot_bench_clean_hash_table,
+
+	.bench_insert_item = slot_bench_insert_item,
+	.bench_alloc_insert_data = slot_bench_alloc_insert_data,
+	.bench_search_item = slot_bench_search_item,
+	.bench_delete_item = slot_bench_delete_item,
+	
+	.bench_print_hash_table_info = slot_bench_print_hash_table_info,
+};

@@ -11,16 +11,40 @@
 
 #include "benchmark.h"
 
+#if 0
+typedef struct word_list_s {
+	char	**word;
+	int 	*lens;
+	uint32_t *hash;
+
+	int		alloc_cnt;
+	int		word_cnt;
+} word_list_t;
+
+typedef struct thread_arg_s {
+	int idx;
+	int act;
+	int nwait;
+	int round;
+
+	word_list_t *w;
+	cuckoo_hash_table_t *fglock_ht;
+} thread_arg_t;
+typedef void *(*start_routine) (void *);
+
+#endif
+
 pthread_t threads[5];
 int done[5];
 
 
 void *thread_main_delete(void *arg);
 void *thread_main_reinsert(void *arg);
-void *thread_main_search(void *arg);
 int thread_main(word_list_t *w, cuckoo_bench_t *bm, void *ht);
 
 /////////////////////////////////
+
+
 
 int get_line_count(FILE *fp)
 {
@@ -140,6 +164,61 @@ void free_word_list(word_list_t *w)
 	cuckoo_free(w->items);
 }
 
+
+#if 0
+int _compare_key(const void *key1, const void *key2, const size_t nkey)
+{
+	const char *_key1 = (const char *)key1;
+	//const char *_key2 = (const char *)key2;
+	const char *_key2;
+#if 0
+	cuckoo_item_t *it = (cuckoo_item_t*)key2;
+	_key2 = (const char*)it->key;
+
+	if (nkey != it->key_len) {
+		return -1;
+	}
+
+
+	char **pp = (char**)it;
+	char *p = *pp;
+	printf("it=%p, %p, key=%p, %p \n", it, pp,  it->key, p );
+#else
+	char **pp = (char**)key2;
+	_key2 = (const char*)*pp;
+#endif
+
+	return memcmp(_key1, _key2, nkey);
+}
+
+cuckoo_item_t* alloc_item(const char *key, const char *val, int len)
+{
+
+	cuckoo_item_t *it = cuckoo_malloc(sizeof(cuckoo_item_t));
+	
+	if (it == NULL) {
+		return NULL;
+	}
+
+	it->key = strdup(key);
+	it->key_len = len;
+	it->value = strdup(val);
+
+	return it;
+}
+
+void free_item(cuckoo_item_t *it)
+{
+	if (it == NULL || it == RET_PTR_ERR) {
+		return;
+	}
+
+	cuckoo_free((void*)it->key);
+	cuckoo_free(it->value);
+	cuckoo_free(it);
+}
+#endif
+
 struct timespec diff_time(char *msg, struct timespec start, struct timespec end, int cnt)
 {
 	struct timespec temp;
@@ -163,10 +242,9 @@ struct timespec diff_time(char *msg, struct timespec start, struct timespec end,
 
 thread_function main_list[] = {
 	thread_main_reinsert,
+	//thread_main_delete,
+	//thread_main_reinsert,
 	thread_main_delete,
-	thread_main_reinsert,
-	thread_main_delete,
-	thread_main_search,
 };
 
 int thread_main(word_list_t *w, cuckoo_bench_t *bm, void *ht)
@@ -181,15 +259,13 @@ int thread_main(word_list_t *w, cuckoo_bench_t *bm, void *ht)
 
 	srand(time(NULL));
 
-	printf("Created Thread: %d \n", NUM_THREAD);
-
 	for (i=0; i<NUM_THREAD; i++) {
 		t[i].idx = i+1;
 		t[i].w = w;
 		t[i].hashtable = ht;
 		//t[i].nwait = (rand() % 10) + 1;
 		t[i].nwait = 1;
-		t[i].round = 10;
+		t[i].round = 2;
 		t[i].bm = bm;
 	}
 
@@ -241,7 +317,7 @@ void *thread_main_reinsert(void *arg)
 	int try_cnt = 0, found=0;
 
 	for (i=0; i<t->round; i++) {
-		printf("%d: Reinsert round=%d \n", t->idx, i);
+		printf("%d: finding round=%d \n", t->idx, i);
 		fflush(NULL);
 
 		for (j = 0; j < w->word_cnt; j++) {
@@ -249,6 +325,7 @@ void *thread_main_reinsert(void *arg)
 			val = key;
 			klen = w->lens[j];
 			hash = w->hash[j];
+
 
 			try_cnt ++;
 
@@ -259,10 +336,25 @@ void *thread_main_reinsert(void *arg)
 				continue;
 			}
 
-			// call fglock_bench_alloc_insert_data()
 			if (bm->bench_alloc_insert_data(ht, key, klen, val, hash) == 0) {
 				reinserted_cnt ++;
 			}
+#if 0
+			cuckoo_item_t *it;
+			if ((it = alloc_item(key, val, klen)) != NULL) {
+				int ret;
+				ret = cuckoo_insert(fglock_ht, hash, it);
+				if (ret) {
+					reinserted_cnt ++;
+				}
+				else {
+					free_item(it);
+				}
+			}
+			else {
+				printf("no more momory !!! \n");
+			}
+#endif
 		}
 	}
 
@@ -275,67 +367,17 @@ void *thread_main_reinsert(void *arg)
 	return NULL;
 }
 
-void *thread_main_search(void *arg)
-{
-	thread_arg_t *t;
-	pthread_t id = pthread_self();
-	word_list_t *w;
-	void *ht;
-	cuckoo_bench_t *bm;
-
-	t = (thread_arg_t*)arg;
-	ht = t->hashtable;
-	w = t->w;
-	bm = t->bm;
-
-	printf("##### Search thread: running thread(%d: %lu), wait %d sec \n", 
-		   t->idx, id, t->nwait);
-	fflush(NULL);
-
-	sleep(t->nwait);
-
-	int i, j;
-	char *key;
-	uint32_t klen, hash;
-	int try_cnt = 0, found=0;
-
-	for (i=0; i<t->round; i++) {
-		printf("%d: Searching round=%d \n", t->idx, i);
-		fflush(NULL);
-
-		for (j = 0; j < w->word_cnt; j++) {
-			key = w->word[j];
-			klen = w->lens[j];
-			hash = w->hash[j];
-
-			try_cnt ++;
-
-			// call fglock_bench_search_item()
-			int ret = bm->bench_search_item(ht, (const char *)key, (const size_t)klen, hash);
-			if (ret == 0) {
-				found ++;
-				continue;
-			}
-		}
-	}
-
-	printf("%d: Searching: Round=%d, try=%d, found=%d \n", t->idx, i, try_cnt, found);
-	fflush(NULL);
-
-	pthread_exit((void *) 0);
-
-	return NULL;
-}
-
 void *thread_main_delete(void *arg)
 {
 	thread_arg_t *t;
 	pthread_t id = pthread_self();
+	//cuckoo_hash_table_t *fglock_ht;
 	void *ht;
 	word_list_t *w;
 	cuckoo_bench_t *bm;
 
 	t = (thread_arg_t*)arg;
+	//fglock_ht = (cuckoo_hash_table_t*)t->data;
 	ht = t->hashtable;
 	w = t->w;
 	bm = t->bm;
@@ -355,8 +397,6 @@ void *thread_main_delete(void *arg)
 	int try_cnt=0;
 
 	for (i=0; i<t->round; i++) {
-		printf("%d: Delete round=%d \n", t->idx, i);
-		fflush(NULL);
 		for (j = 0; j < w->word_cnt; j++) {
 			key = w->word[j];
 			klen = w->lens[j];
@@ -374,10 +414,25 @@ void *thread_main_delete(void *arg)
 			else {
 				not_deleted_cnt ++;
 			}
+#if 0
+			pthread_spin_lock(&fglock_ht->wlocks);
+			data = cuckoo_delete(fglock_ht, key, klen, hash);
+			pthread_spin_unlock(&fglock_ht->wlocks);
+			if (data == RET_PTR_ERR) {
+				not_found ++;
+			}
+			else if (data) {
+				free_item(data);
+				deleted_cnt ++;
+			}
+			else {
+				not_deleted_cnt ++;
+			}
+#endif
 		}
 	}
 
-	printf("%d: Delete : Round=%d, try=%d, deleted=%d, not_deleted=%d, not found=%d \n", 
+	printf("%d: Deleted : Round=%d, try=%d, deleted=%d, not_deleted=%d, not found=%d \n", 
 		   t->idx, i, try_cnt, deleted_cnt, not_deleted_cnt, not_found);
 	fflush(NULL);
 
@@ -386,6 +441,142 @@ void *thread_main_delete(void *arg)
 	return NULL;
 }
 
+//////////////////////////////////////////////////////////
+
+#if 0
+int test_lock_cuckoo(word_list_t *w, int thread_test)
+{
+	int i, inserted;
+	char *key;
+	char *val;
+	uint32_t klen;
+
+	// fglock hash table
+	cuckoo_hash_table_t *fglock_ht;
+	cuckoo_item_t **items;
+
+	///////////////////////////
+	// init hash entries
+	items = cuckoo_malloc(sizeof(cuckoo_item_t*) * w->word_cnt);
+
+	for (i = 0; i < w->word_cnt; i++) {
+		key = w->word[i];
+		val = key;
+
+		cuckoo_item_t* it = alloc_item(key, val, w->lens[i]);
+		items[i] = it;
+	}
+
+	///////////////////////////
+	// init hash tables
+	fglock_ht = cuckoo_init_hash_table(23, _compare_key);
+
+	printf("Hashtable size: %lu\n", fglock_ht->hash_size);
+	fflush(NULL);
+
+
+	////////////////////////////////
+	// inserting 
+
+	struct timespec begin, end;
+	clockid_t cid;
+	cid = CLOCK_MONOTONIC;
+	//cid = CLOCK_PROCESS_CPUTIME_ID;
+	//cid = CLOCK_THREAD_CPUTIME_ID;
+
+	clock_gettime(cid, &begin);
+
+	for (i = 0; i < w->word_cnt; i++) {
+		cuckoo_item_t *it = items[i];
+
+		int ret = cuckoo_insert(fglock_ht, w->hash[i], it);
+		if (ret == 0) {
+			printf("insert failed: ret=%d, key=%s, hash=%u \n", ret, w->word[i], w->hash[i]);
+
+			free_item(it);
+			break;
+		}
+	}
+
+	clock_gettime(cid, &end);
+	diff_time("Insert", begin, end, w->word_cnt);
+
+	printf("adding key pairs: %d of %d \n", fglock_ht->num_items, w->word_cnt);
+	printf("Cuckoo Movements: %d \n", fglock_ht->num_moves);
+	fflush(NULL);
+
+	/////////////////////////////////////
+	// searching
+
+	inserted = fglock_ht->num_items;
+	int found = 0;
+
+	char *val1 = NULL;
+	cuckoo_item_t *it;
+
+	clock_gettime(cid, &begin);
+
+	for (i = 0; i < inserted; i++) {
+		key = w->word[i];
+		klen = w->lens[i];
+		val = key;
+
+		//__builtin_prefetch(key);
+		it = cuckoo_find(fglock_ht, (const char *)key, (const size_t)klen, w->hash[i]);
+		if (it) {
+			val1 = (char *)it->value;
+		}
+
+		if (val1 == NULL || strncmp(val, val1, klen) != 0) {
+			//printf("%d: mismatch value: val=%s, %s \n", i, val, val1);
+		}
+		else {
+			found++;
+		}
+	}
+
+	clock_gettime(cid, &end);
+	diff_time("Search", begin, end, w->word_cnt);
+
+	printf("Hashtable size: %lu\n", fglock_ht->hash_size);
+	printf("lookup key pairs: %d of %d \n", found, fglock_ht->num_items);
+	printf("done. \n");
+
+	///////////////////////////
+	// threading
+
+	if (thread_test) {
+		thread_main(w, fglock_ht);
+	}
+
+
+	//////////////////////////////////////
+	// cleaning 
+
+	printf("Clean all items\n");
+
+	cuckoo_free(items);
+
+	for (i = 0; i < inserted; i++) {
+		key = w->word[i];
+		klen = w->lens[i];
+		cuckoo_item_t *data;
+
+		data = cuckoo_delete(fglock_ht, key, klen, w->hash[i]);
+		if (data != RET_PTR_ERR && data != NULL) {
+			free_item(data);
+		}
+	}
+
+	cuckoo_destroy_hash_table(fglock_ht);
+
+	printf("Clean wordlist\n");
+	free_word_list(w);
+
+	return 0;
+}
+#endif
+
 /////////////////////////////////////////
 
 int run_benchmark(word_list_t *w, cuckoo_bench_t *bm, int thread_test)
@@ -393,8 +584,6 @@ int run_benchmark(word_list_t *w, cuckoo_bench_t *bm, int thread_test)
 	int i, inserted;
 	char *key;
 	uint32_t klen;
-
-	printf("===== Start Benchmark test: %s ===== \n", bm->name);
 
 	// init the hash table and entries
 	// call fglock_bench_init_hash_table()
@@ -417,13 +606,9 @@ int run_benchmark(word_list_t *w, cuckoo_bench_t *bm, int thread_test)
 	clock_gettime(cid, &begin);
 
 	for (i = 0; i < w->word_cnt; i++) {
-		key = w->word[i];
-		klen = w->lens[i];
 		void *it = w->items[i];
 
-		// call fglock_bench_insert_item()
-		int ret = bm->bench_insert_item(ht, key, klen, NULL, w->hash[i], it);
-		//printf("insert : ret=%d, key=%s, hash=%u \n", ret, w->word[i], w->hash[i]);
+		int ret = bm->bench_insert_item(ht, w->hash[i], it);
 		if (ret == 0) {
 			printf("insert failed: ret=%d, key=%s, hash=%u \n", ret, w->word[i], w->hash[i]);
 			break;
@@ -448,6 +633,7 @@ int run_benchmark(word_list_t *w, cuckoo_bench_t *bm, int thread_test)
 		key = w->word[i];
 		klen = w->lens[i];
 
+		//__builtin_prefetch(key);
 		// call fglock_bench_search_item()
 		int ret = bm->bench_search_item(ht, (const char *)key, (const size_t)klen, w->hash[i]);
 		if (ret == 0) {
@@ -511,15 +697,15 @@ int main()
 	//#define MAX_WORD  2434783
 	//#define MAX_WORD  9462148
 //#define MAX_WORD    9462148
-#define MAX_WORD    4000000
+#define MAX_WORD    2
 
 	get_words(&w, MAX_WORD);
 
 	printf("word count:%d \n", w.word_cnt);
 	fflush(NULL);
 
+	//test_lock_cuckoo(&w, 0);
 	run_benchmark(&w, &fglock_bench, 1);
-	//run_benchmark(&w, &slot_bench, 0);
 	
 	return 0;
 }

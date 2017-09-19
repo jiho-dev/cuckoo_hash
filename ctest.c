@@ -2,8 +2,8 @@
 #include <string.h>
 #include <malloc.h>
 
+#include "bin_cuckoo.h"
 #if 0
-#include "cuckoo.h"
 #include "lib_cuckoo_hash.h"
 #endif
 
@@ -47,7 +47,6 @@ int get_words(word_list_t *w, int cnt)
 	return i;
 }
 
-#if 0
 int test_my_cuckoo(word_list_t *w, size_t elem_size)
 {
 	cuckoo_hashtable_t *ht;
@@ -116,6 +115,7 @@ int test_my_cuckoo(word_list_t *w, size_t elem_size)
 	return 0;
 }
 
+#if 1
 int test_lib_cuckoo(word_list_t *w, size_t elem_size)
 {
 	struct cuckoo_hash ht;
