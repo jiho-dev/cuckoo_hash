@@ -489,6 +489,18 @@ uint32_t cuckoo_hash(const char *key, const uint32_t len)
 	return hash;
 }
 
+static inline
+uint32_t cuckoo_read_even(cuckoo_hash_table_t *cukht, size_t lock)
+{
+	uint32_t c;
+
+	do {
+		c = READ_KEYVER(cukht, lock);
+	} while (c & 1);
+
+	return c;
+}
+
 /*
  * The interface to find a key in this hash table
  */
@@ -506,20 +518,20 @@ void* cuckoo_find(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey
 	size_t lock = lock_index(i1, i2);
 	uint32_t vs, ve;
 	size_t j;
+	volatile uint32_t tags1, tags2;
 
 TRY_AGAIN:
-	vs = READ_KEYVER(cukht, lock);
 
 #ifdef CUCKOO_LOCK_FINEGRAIN
 	fg_lock(cukht, i1, i2);
 #endif
 
-	volatile uint32_t tags1, tags2;
-
+	//vs = READ_KEYVER(cukht, lock);
+	vs = cuckoo_read_even(cukht, lock);
 	tags1 = *((uint32_t *)&(cukht->buckets[i1]));
 
-	if (vs & 1) 
-		goto TRY_AGAIN;
+	//if (vs & 1) 
+	//	goto TRY_AGAIN;
 
 	for (j = 0; j < BUCKET_SLOT_SIZE; j++) {
 		uint8_t ch = ((uint8_t *)&tags1)[j];
@@ -527,16 +539,18 @@ TRY_AGAIN:
 			continue;
 		}
 
-		ve = READ_KEYVER(cukht, lock);
+		ve = cuckoo_read_even(cukht, lock);
+		//ve = READ_KEYVER(cukht, lock);
 		void *data = cukht->buckets[i1].slots[j];
 		__builtin_prefetch(data);
 		if (data == NULL) {
 			continue;
 		}
 
-		if (ve & 1 || vs != ve)
+		//if ((ve & 1) || vs != ve)
+		if (vs != ve)
 			goto TRY_AGAIN;
-		
+
 		// call _compare_key()
 		if (cukht->cb_cmp_key((const void *)key, data, nkey) == 0) {
 			result = data;
@@ -554,16 +568,18 @@ TRY_AGAIN:
 				continue;
 			}
 
-			ve = READ_KEYVER(cukht, lock);
+			//ve = READ_KEYVER(cukht, lock);
+			ve = cuckoo_read_even(cukht, lock);
 			void *data = cukht->buckets[i2].slots[j];
 			__builtin_prefetch(data);
 			if (data == NULL) {
 				continue;
 			}
 
-			if (ve & 1 || vs != ve)
+			//if (ve & 1 || vs != ve)
+			if (vs != ve)
 				goto TRY_AGAIN;
-			
+
 			// call _compare_key()
 			if (cukht->cb_cmp_key((const void *)key, data, nkey) == 0) {
 				result = data;
@@ -574,8 +590,10 @@ TRY_AGAIN:
 
 END:
 
-	ve = READ_KEYVER(cukht, lock);
-	if (ve & 1 || vs != ve)
+	//ve = READ_KEYVER(cukht, lock);
+	ve = cuckoo_read_even(cukht, lock);
+	//if (ve & 1 || vs != ve)
+	if (vs != ve)
 		goto TRY_AGAIN;
 
 #ifdef CUCKOO_LOCK_FINEGRAIN
