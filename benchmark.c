@@ -395,6 +395,7 @@ int run_benchmark(word_list_t *w, cuckoo_bench_t *bm, int thread_test)
 	uint32_t klen;
 
 	printf("===== Start Benchmark test: %s ===== \n", bm->name);
+	fflush(NULL);
 
 	// init the hash table and entries
 	// call fglock_bench_init_hash_table()

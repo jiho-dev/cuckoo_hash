@@ -16,24 +16,10 @@
  */
 #define CUCKOO_WIDTH 1
 
-
-
-
 /*
  * enable bucket locking
  */
-//#define MEMC3_LOCK_FINEGRAIN    1
-
-/*
- * enable optimistic locking
- */
-#define MEMC3_LOCK_OPT    1
-
-
-#if (MEMC3_LOCK_OPT + MEMC3_LOCK_FINEGRAIN + MEMC3_LOCK_GLOBAL + MEMC3_LOCK_NONE != 1)
-#error "you must specify one and only locking policy"
-#endif
-
+//#define CUCKOO_LOCK_FINEGRAIN    1
 
 ////////////////////////////////
 
@@ -61,15 +47,11 @@
 
 #define RET_PTR_ERR 	((void*)-1)
 
-
-//#ifdef MEMC3_LOCK_OPT
 //  keyver array has 8192 buckets,
 #define KEYVER_COUNT 		((unsigned long int)1 << (13))
 #define KEYVER_MASK  		(KEYVER_COUNT - 1)
 #define READ_KEYVER(cukht, lock) 	__sync_fetch_and_add(&cukht->keyver_array[lock & KEYVER_MASK], 0)
 #define INC_KEYVER(cukht, lock) 	__sync_fetch_and_add(&cukht->keyver_array[lock & KEYVER_MASK], 1)
-
-//#endif
 
 /////////////////////////////////////////////////
 
