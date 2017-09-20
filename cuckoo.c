@@ -35,7 +35,7 @@ tag_t tag_hash(const uint32_t hv, const uint64_t tagmask)
 	return (tag_t)r + (r == 0);
 }
 
-static inline size_t lock_index(const size_t i1, const size_t i2) 
+static inline size_t keyver_index(const size_t i1, const size_t i2) 
 {
     return i1 <  i2 ? i1 : i2;
 }
@@ -323,7 +323,7 @@ static int32_t move_backward(cuckoo_hash_table_t *cukht, size_t depth_start, siz
 		}
 
 		if (IS_SLOT_EMPTY(cukht, i2, j2)) {
-			size_t lock   = lock_index(i1, i2);
+			size_t lock   = keyver_index(i1, i2);
 			INC_KEYVER(cukht, lock);
 
 #ifdef CUCKOO_LOCK_FINEGRAIN
@@ -501,10 +501,87 @@ uint32_t cuckoo_read_even(cuckoo_hash_table_t *cukht, size_t lock)
 	return c;
 }
 
+static inline int32_t cuckoo_find_slot(uint32_t tags, tag_t tag)
+{
+	int32_t j;
+
+	for (j = 0; j < BUCKET_SLOT_SIZE; j++) {
+		if (tag == ((tag_t *)&tags)[j]) {
+			return j;
+		}
+	}
+
+	return -1;
+}
+
+static inline int32_t cuckoo_changed(cuckoo_hash_table_t *cukht, size_t lock, uint32_t c)
+{
+	return (c != READ_KEYVER(cukht, lock));
+
+}
+
+static inline 
+void* cuckoo_find_data(cuckoo_hash_table_t *cukht, tag_t tag, size_t idx, size_t kidx, const void *key, uint32_t nkey) 
+{
+	void *result = NULL, *data;
+	uint32_t vs;
+	volatile uint32_t tags;
+	int32_t j;
+
+	do {
+		vs = cuckoo_read_even(cukht, kidx);
+		//__builtin_prefetch(&(cukht->buckets[idx]));
+		tags = *((uint32_t *)&(cukht->buckets[idx]));
+		j = cuckoo_find_slot(tags, tag);
+
+		if (cuckoo_changed(cukht, kidx, vs)) {
+			continue;
+		}
+		else if (j < 0) {
+			return NULL;
+		}
+
+		data = cukht->buckets[idx].slots[j];
+		__builtin_prefetch(data);
+
+		// call _compare_key()
+		if (data && 
+			cukht->cb_cmp_key((const void *)key, data, nkey) == 0) {
+			result = data;
+		}
+
+	} while(cuckoo_changed(cukht, kidx, vs));
+
+	return result;
+}
+
+void* cuckoo_find(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey, const uint32_t hash)
+{
+	tag_t tag;
+	size_t i1, i2;
+	void *result = NULL;
+	size_t kidx;
+
+	//hash = cuckoo_hash(key, nkey);
+	tag = tag_hash(hash, cukht->tag_mask);
+	i1 = index_hash(hash, cukht->hash_power);
+	i2 = alt_index(i1, tag, cukht->tag_mask, cukht->hash_mask);
+	kidx = keyver_index(i1, i2);
+
+	result = cuckoo_find_data(cukht, tag, i1, kidx, key, nkey);
+	if (result != NULL) {
+		return result;
+	}
+
+	result = cuckoo_find_data(cukht, tag, i2, kidx, key, nkey);
+
+	return result;
+}
+
 /*
  * The interface to find a key in this hash table
  */
-void* cuckoo_find(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey, const uint32_t hash)
+void* cuckoo_find1(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey, const uint32_t hash)
 {
 	tag_t tag;
 	size_t i1, i2;
@@ -515,7 +592,7 @@ void* cuckoo_find(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey
 	i2 = alt_index(i1, tag, cukht->tag_mask, cukht->hash_mask);
 
 	void *result = NULL;
-	size_t lock = lock_index(i1, i2);
+	size_t lock = keyver_index(i1, i2);
 	uint32_t vs, ve;
 	size_t j;
 	volatile uint32_t tags1, tags2;
@@ -614,7 +691,7 @@ void* cuckoo_delete(cuckoo_hash_table_t *cukht, const char *key, const size_t nk
 	tag = tag_hash(hash, cukht->tag_mask);
 	i1 = index_hash(hash, cukht->hash_power);
 	i2 = alt_index(i1, tag, cukht->tag_mask, cukht->hash_mask);
-	size_t lock = lock_index(i1, i2);
+	size_t lock = keyver_index(i1, i2);
 
 	pthread_spin_lock(&cukht->wlock);
 
@@ -640,7 +717,7 @@ int32_t cuckoo_insert(cuckoo_hash_table_t *cukht, const uint32_t hash, void *dat
 	tag = tag_hash(hash, cukht->tag_mask);
 	i1 = index_hash(hash, cukht->hash_power);
 	i2 = alt_index(i1, tag, cukht->tag_mask, cukht->hash_mask);
-	size_t lock = lock_index(i1, i2);
+	size_t lock = keyver_index(i1, i2);
 
 	//fg_lock(cukht, i1, i2);
 	pthread_spin_lock(&cukht->wlock);

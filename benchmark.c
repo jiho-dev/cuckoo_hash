@@ -544,15 +544,15 @@ int main()
 	//#define MAX_WORD  80000
 	//#define MAX_WORD  2434783
 	//#define MAX_WORD  9462148
-#define MAX_WORD    9462148
-//#define MAX_WORD    4000000
+//#define MAX_WORD    9462148
+#define MAX_WORD    40
 
 	get_words(&w, MAX_WORD);
 
 	printf("word count:%d \n", w.word_cnt);
 	fflush(NULL);
 
-	run_benchmark(&w, &fglock_bench, 1);
+	run_benchmark(&w, &fglock_bench, 0);
 	//run_benchmark(&w, &slot_bench, 0);
 	
 	return 0;
