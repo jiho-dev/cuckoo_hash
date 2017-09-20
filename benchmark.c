@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <string.h>
 #include <sys/types.h>
@@ -5,6 +6,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <time.h>
+#include <sched.h>   //cpu_set_t , CPU_SET
 
 #include "cuckoo.h"
 #include "cuckoo_malloc.h"
@@ -214,6 +216,31 @@ int thread_main(word_list_t *w, cuckoo_bench_t *bm, void *ht)
 	return 0;
 }
 
+int stick_thread(int idx)
+{
+	cpu_set_t cpuset; 
+
+	int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
+	if (idx < 0 || idx >= num_cores)
+		return EINVAL;
+
+	CPU_ZERO(&cpuset);       //clears the cpuset
+	CPU_SET(idx, &cpuset); //set CPU 2 on cpuset
+
+	/*
+	 * cpu affinity for the calling thread 
+	 * first parameter is the pid, 0 = calling thread
+	 * second parameter is the size of your cpuset
+	 * third param is the cpuset in which your thread will be
+	 * placed. Each bit represents a CPU
+	 */
+
+	pthread_t current_thread = pthread_self();    
+	sched_setaffinity(current_thread, sizeof(cpuset), &cpuset);
+
+	return 0;
+}
+
 void *thread_main_reinsert(void *arg)
 {
 	thread_arg_t *t;
@@ -226,6 +253,8 @@ void *thread_main_reinsert(void *arg)
 	ht = t->hashtable;
 	w = t->w;
 	bm = t->bm;
+
+	stick_thread(t->idx+1);
 
 	printf("##### Reinsert thread: running thread(%d: %lu), wait %d sec \n", 
 		   t->idx, id, t->nwait);
@@ -288,6 +317,8 @@ void *thread_main_search(void *arg)
 	w = t->w;
 	bm = t->bm;
 
+	stick_thread(t->idx+1);
+
 	printf("##### Search thread: running thread(%d: %lu), wait %d sec \n", 
 		   t->idx, id, t->nwait);
 	fflush(NULL);
@@ -339,6 +370,8 @@ void *thread_main_delete(void *arg)
 	ht = t->hashtable;
 	w = t->w;
 	bm = t->bm;
+
+	stick_thread(t->idx+1);
 
 	printf("##### Delete thread: running thread(%d: %lu), wait %d sec\n", 
 		   t->idx, id, t->nwait);
@@ -511,8 +544,8 @@ int main()
 	//#define MAX_WORD  80000
 	//#define MAX_WORD  2434783
 	//#define MAX_WORD  9462148
-//#define MAX_WORD    9462148
-#define MAX_WORD    4000000
+#define MAX_WORD    9462148
+//#define MAX_WORD    4000000
 
 	get_words(&w, MAX_WORD);
 

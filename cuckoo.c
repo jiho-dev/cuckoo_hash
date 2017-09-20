@@ -141,19 +141,21 @@ static void* try_read(cuckoo_hash_table_t *cukht, const char *key, const size_t 
 static int32_t try_add(cuckoo_hash_table_t *cukht, void *data, tag_t tag, size_t i, size_t lock)
 {
 	size_t j;
+#if 0
 	uint32_t vs, ve;
 
 TRY_START:
 	vs = READ_KEYVER(cukht, lock);
 
 	// odd means that key is under referenced by the other
-#if 0
 	if (vs & 1)
 		goto TRY_START;
 #endif
 
 	for (j = 0; j < BUCKET_SLOT_SIZE; j++) {
+#if 0
 		ve = READ_KEYVER(cukht, lock);
+#endif
 
 		if (IS_SLOT_EMPTY(cukht, i, j)) {
 #if 0
@@ -190,12 +192,12 @@ static void* try_del(cuckoo_hash_table_t *cukht, const char *key, const size_t n
 {
 	size_t j;
 	void *data = NULL;
+#if 0
 	uint32_t vs, ve;
 
 TRY_START:
 	vs = READ_KEYVER(cukht, lock);
 
-#if 0
 	if (vs & 1)
 		goto TRY_START;
 #endif
