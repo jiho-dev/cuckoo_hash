@@ -5,13 +5,13 @@ Bucketized Cuckoo Hashing has some slots at each bucket. With the slots, the loa
 
 This library will be used for Session table with Linux Kernel Module. The table may handle more than 500 Million entries under 10 or 40 Gpbs NICs. 
 
-## Benchmark Test
+## Benchmark Test:
 
-OS: Ubuntu 16.04
-CPU: Intel(R) Xeon(R) CPU E5-2650 v2 @ 2.60GHz
-DRAM: 16GB
-Testing Material: random length 9,462,148 words
-Benchmark Test Result:
+* OS: Ubuntu 16.04
+* CPU: Intel(R) Xeon(R) CPU E5-2650 v2 @ 2.60GHz
+* DRAM: 16GB
+* Test Material: random length 9,462,148 words
+* Benchmark Test Result:
 <pre><code>
 ===== Start Benchmark test: CUCKOO_HASHTABLE ===== 
 Hashtable size: 8388608
@@ -21,8 +21,6 @@ Cuckoo Movements: 1066
 Search Exec time: 1.109744371 sec, Count:9462148, Per nsec:117 
 lookup key pairs: 9462148 of 9462148 
 </code></pre>
-
-
 
 ## References: 
 
