@@ -98,88 +98,151 @@ int32_t dummy_cmp_key(const void *key1, const void *key2, const size_t nkey)
 	return -1;
 }
 
-#if 0
-/*
- * Try to read bucket i and check if the given tag is there
- */
-static void* try_read(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey, tag_t tag, size_t i)
+static inline
+uint32_t cuckoo_read_even_count(cuckoo_hash_table_t *cukht, size_t kidx)
 {
-	volatile uint32_t tmp = *((uint32_t *)&(cukht->buckets[i]));
-	size_t j;
+	uint32_t c;
+
+	do {
+		c = READ_KEYVER(cukht, kidx);
+	} while (c & 1);
+
+	return c;
+}
+
+static inline 
+int32_t cuckoo_changed_count(cuckoo_hash_table_t *cukht, size_t kidx, uint32_t c)
+{
+	return (c != READ_KEYVER(cukht, kidx));
+}
+
+#if 0
+static inline int32_t cuckoo_find_slot(uint32_t tags, tag_t tag)
+{
+	int32_t j;
 
 	for (j = 0; j < BUCKET_SLOT_SIZE; j++) {
-		uint8_t ch = ((uint8_t *)&tmp)[j];
-
-		if (ch != tag) {
-			continue;
-		}
-
-		/* volatile __m128i p, q; */
-		/* p = _mm_loadu_si128((__m128i const *) &buckets[i].slots[0]); */
-		/* q = _mm_loadu_si128((__m128i const *) &buckets[i].slots[2]); */
-		/* void *slots[4]; */
-
-		/* _mm_storeu_si128((__m128i *) slots, p); */
-		/* _mm_storeu_si128((__m128i *) (slots + 2), q); */
-		/* void *data = slots[j]; */
-
-		void *data = cukht->buckets[i].slots[j];
-
-		if (cukht->cb_cmp_key((const void *)key, data, nkey) == 0) {
-			return data;
+		if (tag == ((tag_t *)&tags)[j]) {
+			return j;
 		}
 	}
 
-	return NULL;
+	return -1;
 }
+
+static inline 
+void* cuckoo_find_data(cuckoo_hash_table_t *cukht, tag_t tag, size_t idx, size_t kidx, const void *key, uint32_t nkey) 
+{
+	void *result = NULL, *data;
+	uint32_t vs;
+	volatile uint32_t tags;
+	int32_t j;
+
+	do {
+		vs = cuckoo_read_even_count(cukht, kidx);
+		//__builtin_prefetch(&(cukht->buckets[idx]));
+		tags = *((uint32_t *)&(cukht->buckets[idx]));
+		j = cuckoo_find_slot(tags, tag);
+
+		if (cuckoo_changed_count(cukht, kidx, vs)) {
+			continue;
+		}
+		else if (j < 0) {
+			return NULL;
+		}
+
+		data = cukht->buckets[idx].slots[j];
+		__builtin_prefetch(data);
+
+		// call _compare_key()
+		if (data && 
+			cukht->cb_cmp_key((const void *)key, data, nkey) == 0) {
+			result = data;
+		}
+
+	} while(cuckoo_changed_count(cukht, kidx, vs));
+
+	return result;
+}
+
 #endif
+
+/*
+ * Try to read bucket i and check if the given tag is there
+ */
+static inline 
+void* try_read(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey, tag_t tag, size_t bkidx, size_t kidx)
+{
+	uint32_t vs;
+	volatile uint32_t tmp;
+	int32_t sidx;
+	void *result = NULL;
+
+	do {
+START:
+		vs = cuckoo_read_even_count(cukht, kidx);
+		__builtin_prefetch(&(cukht->buckets[bkidx]));
+		tmp = *((uint32_t *)&(cukht->buckets[bkidx]));
+
+		for (sidx = 0; sidx < BUCKET_SLOT_SIZE; sidx++) {
+			if (tag != ((uint8_t *)&tmp)[sidx]) {
+				continue;
+			}
+
+			/* volatile __m128i p, q; */
+			/* p = _mm_loadu_si128((__m128i const *) &buckets[i].slots[0]); */
+			/* q = _mm_loadu_si128((__m128i const *) &buckets[i].slots[2]); */
+			/* void *slots[4]; */
+
+			/* _mm_storeu_si128((__m128i *) slots, p); */
+			/* _mm_storeu_si128((__m128i *) (slots + 2), q); */
+			/* void *data = slots[j]; */
+
+			if (cuckoo_changed_count(cukht, kidx, vs)) {
+				goto START;
+			}
+
+			result = NULL;
+			void *data = cukht->buckets[bkidx].slots[sidx];
+			__builtin_prefetch(data);
+
+			if (data && cukht->cb_cmp_key((const void *)key, data, nkey) == 0) {
+				result = data;
+				break;
+			}
+		}
+
+	} while (cuckoo_changed_count(cukht, kidx, vs));
+
+	return result;
+}
 
 /*
  * Try to add an void to bucket i,
  * return true on success and false on failure
  */
-static int32_t try_add(cuckoo_hash_table_t *cukht, void *data, tag_t tag, size_t i, size_t lock)
+static int32_t try_add(cuckoo_hash_table_t *cukht, void *data, tag_t tag, size_t bkidx, size_t kidx)
 {
 	size_t j;
-#if 0
-	uint32_t vs, ve;
-
-TRY_START:
-	vs = READ_KEYVER(cukht, lock);
-
-	// odd means that key is under referenced by the other
-	if (vs & 1)
-		goto TRY_START;
-#endif
 
 	for (j = 0; j < BUCKET_SLOT_SIZE; j++) {
-#if 0
-		ve = READ_KEYVER(cukht, lock);
-#endif
-
-		if (IS_SLOT_EMPTY(cukht, i, j)) {
-#if 0
-			// still safe ?
-			if ((ve & 1) || vs != ve)
-				goto TRY_START;
-#endif
-
+		if (IS_SLOT_EMPTY(cukht, bkidx, j)) {
 			// make the key odd
-			INC_KEYVER(cukht, lock);
+			INC_KEYVER(cukht, kidx);
 
 #ifdef CUCKOO_LOCK_FINEGRAIN
-			fg_lock(cukht, i, i);
+			fg_lock(cukht, bkidx, bkidx);
 #endif
 
-			cukht->buckets[i].tags[j] = tag;
-			cukht->buckets[i].slots[j] = data;
+			cukht->buckets[bkidx].tags[j] = tag;
+			cukht->buckets[bkidx].slots[j] = data;
 			cukht->num_items++;
 
 			// make the key even
-			INC_KEYVER(cukht, lock);
+			INC_KEYVER(cukht, kidx);
 
 #ifdef CUCKOO_LOCK_FINEGRAIN
-			fg_unlock(cukht, i, i);
+			fg_unlock(cukht, bkidx, bkidx);
 #endif
 			return 1;
 		}
@@ -188,59 +251,40 @@ TRY_START:
 	return 0;
 }
 
-static void* try_del(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey, tag_t tag, size_t i, size_t lock)
+static void* try_del(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey, tag_t tag, size_t bkidx, size_t kidx)
 {
 	size_t j;
 	void *data = NULL;
-#if 0
-	uint32_t vs, ve;
-
-TRY_START:
-	vs = READ_KEYVER(cukht, lock);
-
-	if (vs & 1)
-		goto TRY_START;
-#endif
 
 	for (j = 0; j < BUCKET_SLOT_SIZE; j++) {
-#if 0
-		ve = READ_KEYVER(cukht, lock);
-#endif
-
-		if (!IS_TAG_EQUAL(cukht, i, j, tag)) {
+		if (!IS_TAG_EQUAL(cukht, bkidx, j, tag)) {
 			continue;
 		}
 
-		data = cukht->buckets[i].slots[j];
+		data = cukht->buckets[bkidx].slots[j];
 
 		if (data == NULL) {
 			// found but no data
 			return NULL;
 		}
 
-#if 0
-		// still safe ?
-		if ((ve & 1) || vs != ve)
-			goto TRY_START;
-#endif
-
 		// call _compare_key()
 		if (cukht->cb_cmp_key((const void *)key, data, nkey) == 0) {
 
 #ifdef CUCKOO_LOCK_FINEGRAIN
-			fg_lock(cukht, i, i);
+			fg_lock(cukht, bkidx, bkidx);
 #endif
 
-			INC_KEYVER(cukht, lock);
+			INC_KEYVER(cukht, kidx);
 
-			cukht->buckets[i].tags[j] = 0;
-			cukht->buckets[i].slots[j] = 0;
+			cukht->buckets[bkidx].tags[j] = 0;
+			cukht->buckets[bkidx].slots[j] = 0;
 			cukht->num_items--;
 
-			INC_KEYVER(cukht, lock);
+			INC_KEYVER(cukht, kidx);
 
 #ifdef CUCKOO_LOCK_FINEGRAIN
-			fg_unlock(cukht, i, i);
+			fg_unlock(cukht, bkidx, bkidx);
 #endif
 
 			return data;
@@ -489,72 +533,6 @@ uint32_t cuckoo_hash(const char *key, const uint32_t len)
 	return hash;
 }
 
-static inline
-uint32_t cuckoo_read_even(cuckoo_hash_table_t *cukht, size_t lock)
-{
-	uint32_t c;
-
-	do {
-		c = READ_KEYVER(cukht, lock);
-	} while (c & 1);
-
-	return c;
-}
-
-static inline int32_t cuckoo_find_slot(uint32_t tags, tag_t tag)
-{
-	int32_t j;
-
-	for (j = 0; j < BUCKET_SLOT_SIZE; j++) {
-		if (tag == ((tag_t *)&tags)[j]) {
-			return j;
-		}
-	}
-
-	return -1;
-}
-
-static inline int32_t cuckoo_changed(cuckoo_hash_table_t *cukht, size_t lock, uint32_t c)
-{
-	return (c != READ_KEYVER(cukht, lock));
-
-}
-
-static inline 
-void* cuckoo_find_data(cuckoo_hash_table_t *cukht, tag_t tag, size_t idx, size_t kidx, const void *key, uint32_t nkey) 
-{
-	void *result = NULL, *data;
-	uint32_t vs;
-	volatile uint32_t tags;
-	int32_t j;
-
-	do {
-		vs = cuckoo_read_even(cukht, kidx);
-		//__builtin_prefetch(&(cukht->buckets[idx]));
-		tags = *((uint32_t *)&(cukht->buckets[idx]));
-		j = cuckoo_find_slot(tags, tag);
-
-		if (cuckoo_changed(cukht, kidx, vs)) {
-			continue;
-		}
-		else if (j < 0) {
-			return NULL;
-		}
-
-		data = cukht->buckets[idx].slots[j];
-		__builtin_prefetch(data);
-
-		// call _compare_key()
-		if (data && 
-			cukht->cb_cmp_key((const void *)key, data, nkey) == 0) {
-			result = data;
-		}
-
-	} while(cuckoo_changed(cukht, kidx, vs));
-
-	return result;
-}
-
 void* cuckoo_find(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey, const uint32_t hash)
 {
 	tag_t tag;
@@ -568,16 +546,23 @@ void* cuckoo_find(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey
 	i2 = alt_index(i1, tag, cukht->tag_mask, cukht->hash_mask);
 	kidx = keyver_index(i1, i2);
 
-	result = cuckoo_find_data(cukht, tag, i1, kidx, key, nkey);
-	if (result != NULL) {
-		return result;
+#ifdef CUCKOO_LOCK_FINEGRAIN
+	fg_lock(cukht, i1, i2);
+#endif
+
+	result = try_read(cukht, key, nkey, tag, i1, kidx);
+	if (result == NULL) {
+		result = try_read(cukht, key, nkey, tag, i2, kidx);
 	}
 
-	result = cuckoo_find_data(cukht, tag, i2, kidx, key, nkey);
+#ifdef CUCKOO_LOCK_FINEGRAIN
+	fg_unlock(cukht, i1, i2);
+#endif
 
 	return result;
 }
 
+#if 0
 /*
  * The interface to find a key in this hash table
  */
@@ -604,7 +589,7 @@ TRY_AGAIN:
 #endif
 
 	//vs = READ_KEYVER(cukht, lock);
-	vs = cuckoo_read_even(cukht, lock);
+	vs = cuckoo_read_even_count(cukht, lock);
 	tags1 = *((uint32_t *)&(cukht->buckets[i1]));
 
 	//if (vs & 1) 
@@ -616,7 +601,7 @@ TRY_AGAIN:
 			continue;
 		}
 
-		ve = cuckoo_read_even(cukht, lock);
+		ve = cuckoo_read_even_count(cukht, lock);
 		//ve = READ_KEYVER(cukht, lock);
 		void *data = cukht->buckets[i1].slots[j];
 		__builtin_prefetch(data);
@@ -646,7 +631,7 @@ TRY_AGAIN:
 			}
 
 			//ve = READ_KEYVER(cukht, lock);
-			ve = cuckoo_read_even(cukht, lock);
+			ve = cuckoo_read_even_count(cukht, lock);
 			void *data = cukht->buckets[i2].slots[j];
 			__builtin_prefetch(data);
 			if (data == NULL) {
@@ -668,7 +653,7 @@ TRY_AGAIN:
 END:
 
 	//ve = READ_KEYVER(cukht, lock);
-	ve = cuckoo_read_even(cukht, lock);
+	ve = cuckoo_read_even_count(cukht, lock);
 	//if (ve & 1 || vs != ve)
 	if (vs != ve)
 		goto TRY_AGAIN;
@@ -679,6 +664,7 @@ END:
 
 	return result;
 }
+#endif
 
 // need to be protected by cache_lock
 void* cuckoo_delete(cuckoo_hash_table_t *cukht, const char *key, const size_t nkey, const uint32_t hash)
@@ -691,17 +677,16 @@ void* cuckoo_delete(cuckoo_hash_table_t *cukht, const char *key, const size_t nk
 	tag = tag_hash(hash, cukht->tag_mask);
 	i1 = index_hash(hash, cukht->hash_power);
 	i2 = alt_index(i1, tag, cukht->tag_mask, cukht->hash_mask);
-	size_t lock = keyver_index(i1, i2);
+	size_t kidx = keyver_index(i1, i2);
 
 	pthread_spin_lock(&cukht->wlock);
 
-	data = try_del(cukht, key, nkey, tag, i1, lock);
-	if (data != RET_PTR_ERR) {
-		pthread_spin_unlock(&cukht->wlock);
-		return data;
+	data = try_del(cukht, key, nkey, tag, i1, kidx);
+
+	if (data == RET_PTR_ERR) {
+		data = try_del(cukht, key, nkey, tag, i2, kidx);
 	}
 
-	data = try_del(cukht, key, nkey, tag, i2, lock);
 	pthread_spin_unlock(&cukht->wlock);
 
 	return data;
@@ -712,53 +697,51 @@ int32_t cuckoo_insert(cuckoo_hash_table_t *cukht, const uint32_t hash, void *dat
 {
 	tag_t tag;
 	size_t i1, i2;
+	int32_t ret = 0;
 
 	//hash = cuckoo_hash(key, klen);
 	tag = tag_hash(hash, cukht->tag_mask);
 	i1 = index_hash(hash, cukht->hash_power);
 	i2 = alt_index(i1, tag, cukht->tag_mask, cukht->hash_mask);
-	size_t lock = keyver_index(i1, i2);
+	size_t kidx = keyver_index(i1, i2);
 
-	//fg_lock(cukht, i1, i2);
 	pthread_spin_lock(&cukht->wlock);
 
-	if (try_add(cukht, data, tag, i1, lock) ||
-		try_add(cukht, data, tag, i2, lock)) {
-		pthread_spin_unlock(&cukht->wlock);
-		//fg_unlock(cukht, i1, i2);
-		return 1;
+	if (try_add(cukht, data, tag, i1, kidx) ||
+		try_add(cukht, data, tag, i2, kidx)) {
+		ret = 1;
+		goto END;
 	}
 
-	//fg_unlock(cukht, i1, i2);
-	//pthread_spin_lock(&cukht->wlock);
-
-	int32_t idx;
+	int32_t bkidx;
 	size_t depth = 0;
-	for (idx = 0; idx < CUCKOO_WIDTH; idx++) {
-		if (idx < CUCKOO_WIDTH / 2) {
-			cukht->cuk_path[depth].cp_buckets[idx] = i1;
+	for (bkidx = 0; bkidx < CUCKOO_WIDTH; bkidx++) {
+		if (bkidx < CUCKOO_WIDTH / 2) {
+			cukht->cuk_path[depth].cp_buckets[bkidx] = i1;
 		}
 		else {
-			cukht->cuk_path[depth].cp_buckets[idx] = i2;
+			cukht->cuk_path[depth].cp_buckets[bkidx] = i2;
 		}
 	}
 
 	size_t j;
-	idx = cuckoo(cukht, depth);
-	if (idx >= 0) {
-		i1 = cukht->cuk_path[depth].cp_buckets[idx];
-		j = cukht->cuk_path[depth].cp_slot_idxs[idx];
+	bkidx = cuckoo(cukht, depth);
+	if (bkidx >= 0) {
+		i1 = cukht->cuk_path[depth].cp_buckets[bkidx];
+		j = cukht->cuk_path[depth].cp_slot_idxs[bkidx];
 
 		if (cukht->buckets[i1].slots[j] == 0 &&
-			try_add(cukht, data, tag, i1, lock)) {
-			pthread_spin_unlock(&cukht->wlock);
-			return 1;
+			try_add(cukht, data, tag, i1, kidx)) {
+			ret = 1;
+			goto END;
 		}
 	}
 
+	cukht->num_error++;
+
+END:
 	pthread_spin_unlock(&cukht->wlock);
 
-	cukht->num_error++;
 
 #if 0
 	printf("hash table is full (hashpower = %d, \
@@ -769,7 +752,7 @@ int32_t cuckoo_insert(cuckoo_hash_table_t *cukht, const uint32_t hash, void *dat
 		   1.0 * cukht->num_items / BUCKET_SLOT_SIZE / cukht->hash_size);
 #endif
 
-	return 0;
+	return ret;
 }
 
 /////////////////////////////////////////////////
@@ -946,7 +929,7 @@ static void fglock_bench_clean_hash_table(void *_ht)
 //////////////////////////////////
 
 cuckoo_bench_t fglock_bench = {
-	.name = "FGLOCK_HASHTABLE",
+	.name = "CUCKOO_HASHTABLE",
 	
 	.bench_init_hash_table = fglock_bench_init_hash_table,
 	.bench_clean_hash_table = fglock_bench_clean_hash_table,

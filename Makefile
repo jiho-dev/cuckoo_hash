@@ -3,7 +3,7 @@ CFLAGS=-I. -O2 #-std=c99
 CFLAGS+=-W -Wall -Wextra -Wno-unused-function -Wno-unused-parameter
 #CFLAGS+=-Werror # treat a warning as an error
 #CFLAGS+=-D_REENTRANT -D_GNU_SOURCE
-CFLAGS+=-D__DEBUG__ -g
+#CFLAGS+=-D__DEBUG__ -g
 
 LDFLAGS=-pthread -lpthread
 
@@ -29,10 +29,8 @@ all: tag $(OBJDIR) $(BIN) tag
 #	valgrind  --tool=memcheck --leak-check=yes --show-reachable=yes --log-file="./valgrind.log" ./$(BIN)
 #	perf stat -e L1-dcache-load-misses,L1-dcache-loads ./$(BIN)
 
-
 run: $(BIN)
 	./$(BIN)
-
 
 $(BIN): $(OBJS)
 	$(CC) ${LDFLAGS} -o $@ $^ $(CFLAGS)
