@@ -24,7 +24,7 @@ $(OBJDIR)/%.o: %.c $(DEPS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 all: tag $(OBJDIR) $(BIN) tag 
-	./$(BIN)
+#	./$(BIN)
 #	gdb -ex=r --args ./$(BIN)
 #	valgrind  --tool=memcheck --leak-check=yes --show-reachable=yes --log-file="./valgrind.log" ./$(BIN)
 #	perf stat -e L1-dcache-load-misses,L1-dcache-loads ./$(BIN)

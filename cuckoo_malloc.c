@@ -5,7 +5,7 @@
 
 void* cuckoo_malloc(size_t size)
 {
-#if defined(CUCKOO_ENABLE_HUGEPAGE) && defined(__linux__)
+#if defined(BCHT_ENABLE_HUGEPAGE) && defined(__linux__)
 	if (size % HUGEPAGE_SIZE != 0) {
 		size = (size / HUGEPAGE_SIZE + 1) * HUGEPAGE_SIZE;
 	}
@@ -37,7 +37,7 @@ void* cuckoo_malloc(size_t size)
 
 void cuckoo_free(void *p)
 {
-#if defined(CUCKOO_ENABLE_HUGEPAGE) && defined(__linux__)
+#if defined(BCHT_ENABLE_HUGEPAGE) && defined(__linux__)
 	if (shmdt(p)) {
 		perror("");
 		assert(0);

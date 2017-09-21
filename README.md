@@ -3,7 +3,7 @@
 
 Cuckoo Hashing is a state-of-the-art technology to store data and find them. The time complexity of look-up is O(1) and for insertion also O(1). The maximum load factor, however, is 50% when the data could not be inserted. This is a major drawback to be solved.
 
-Bucketized Cuckoo Hashing, BCH, is one of the solutions. With Cuckoo Hashing, a bucket could store only one data, kicked-out immediately if the collision is raised. What if the bucket might have more rooms to save data. Kicking-out would put off even though three is the collision caused. It is the main conception of Bucketized Cuckoo Hashing. Each bucket has its own slots and its maximum load factor is 95%. But the time complexity is also constant, O(n*2), where n is slots of a bucket.
+Bucketized Cuckoo Hashing, BCH, is one of the solutions. With Cuckoo Hashing, a bucket could store only one data, kicked-out immediately if the collision is raised. What if the bucket might have more rooms to save data. Kicking-out would put off even though three is the collision caused. It is the main conception of Bucketized Cuckoo Hashing. Each bucket has its own slots and its maximum load factor is 95%. But the time complexity is also constant, O(n * 2), where n is slots of a bucket.
 
 This library will be used for Session table with Linux Kernel Module. The table may handle more than 500 Million entries under 10 or 40 Gbps NICs. 
 
@@ -15,7 +15,7 @@ This library will be used for Session table with Linux Kernel Module. The table 
 * Test Material: random length 9,462,148 words
 * Benchmark Test Result:
 <pre><code>
-===== Start Benchmark test: CUCKOO_HASHTABLE ===== 
+===== Start Benchmark test: Bucketized Cuckoo Hashing ===== 
 Hashtable size: 8388608
 Insert Exec time: 0.779468429 sec, Count:9462148, Per nsec:82 
 Adding key pairs: 9462148 

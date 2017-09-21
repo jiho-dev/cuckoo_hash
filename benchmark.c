@@ -110,7 +110,7 @@ void get_words(word_list_t *w, int cnt)
 				w->word[w->word_cnt] = strdup(str);
 				len = strlen(str);
 				w->lens[w->word_cnt] = len;
-				w->hash[w->word_cnt] = cuckoo_hash(str, len);
+				w->hash[w->word_cnt] = bcht_hash(str, len);
 
 				//printf("%d: [%s], len=%d \n", w->word_cnt, str, w->lens[w->word_cnt]);
 
@@ -398,7 +398,7 @@ void *thread_main_delete(void *arg)
 			try_cnt ++;
 			
 			data = bm->bench_delete_item(ht, key, klen, hash);
-			if (data == RET_PTR_ERR) {
+			if (data == BCHT_RET_PTR_ERR) {
 				not_found ++;
 			}
 			else if (data) {

@@ -465,7 +465,7 @@ static cuckoo_item_t* slot_alloc_item(const char *key, const char *val, int len)
 
 static void slot_free_item(cuckoo_item_t *it)
 {
-	if (it == NULL || it == RET_PTR_ERR) {
+	if (it == NULL || it == BCHT_RET_PTR_ERR) {
 		return;
 	}
 
@@ -567,7 +567,7 @@ static void* slot_bench_delete_item(void *_ht, const char *key,  const size_t le
 	it = cuckoo_delete(slot_ht, key, len, hash);
 	pthread_spin_unlock(&slot_ht->wlocks);
 
-	if (it != RET_PTR_ERR && it != NULL) {
+	if (it != BCHT_RET_PTR_ERR && it != NULL) {
 		slot_free_item(it);
 	}
 
