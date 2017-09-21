@@ -34,4 +34,8 @@ Algorithmic Improvements for Fast Concurrent Cuckoo Hashing.
 - https://www.cs.princeton.edu/~mfreed/docs/cuckoo-eurosys14.pdf
 - https://www.usenix.org/system/files/conference/nsdi13/nsdi13-final197.pdf
 
+Sorting Cuckoo
+- http://www.kics.or.kr/Home/UserContents/20170412/170412_100537439.pdf
 
+Horton Tables
+- https://www.usenix.org/system/files/conference/atc16/atc16_paper-breslow.pdf
